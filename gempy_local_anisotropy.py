@@ -69,10 +69,10 @@ class Gempy(grid):
         self.s_2 = 0.01
         
     def interpolation_options(self):
-        print(self.a_T)
-        print(self.c_o_T)
-        print(self.s_1)
-        print(self.s_2)
+        print("a_T =", self.a_T)
+        print("c_o_T =", self.c_o_T)
+        print("s_1 =", self.s_1)
+        print("s_2 =",self.s_2)
     def interpolation_options_set(self, a_T=5, c_o_T = 0.5952380952380952, s_1=0.01, s_2 = 0.01):
         self.a_T = a_T
         self.c_o_T = c_o_T
@@ -80,12 +80,15 @@ class Gempy(grid):
         self.s_2 = s_2
         
     def interface_data(self, sp_coord):
+        print("\n ############# Gempy Options ############# \n")
+        self.interpolation_options()
         self.sp_coord = sp_coord
-        print(self.sp_coord)
+        print("\n ############# Interface data ############# \n",self.sp_coord)
+        
         
     def orientation_data(self, op_coord):
         self.op_coord = op_coord
-        print(self.op_coord)
+        print("\n ############# Orientation data############# \n",self.op_coord)
         
     def activate_custom_grid(self, custom_grid_data):
         if custom_grid_data.shape[1]==len(self.resolution):
@@ -341,36 +344,18 @@ class Gempy(grid):
         b = torch.reshape(b,shape = [b.shape[0],1])
         
         self.w = torch.linalg.solve(K,b)
-        
-        
-    def Solution(self,Transformation_matrix=None ):
-        
-        grid_data_final =[]
-        
-        for keys, values in self.grid_status.items():
-            if values is not None:
-               grid_data_final.append(self.data[keys])   
-        if len(grid_data_final)>1:
-            grid_data_ = torch.cat(grid_data_final, dim=0)
-        elif len(grid_data_final)==1:
-                grid_data_ = grid_data_final[0]
-        else: 
-            print("No grid is active")
-            grid_data_ = None
-            
-        
-        if Transformation_matrix is None:
-            Transformation_matrix = torch.eye(self.op_coord["Positions"].shape[1], dtype =self.dtype)
-        
+    
+    def Solution_grid(self, grid_coord, Transformation_matrix, section_plot= False):
         self.Ge_model(Transformation_matrix=Transformation_matrix)
         
         self.ref_points = torch.unique(self.ref_layer_points,dim=0)
-        
-        if grid_data_ is not None:
-            grid_data_plus_ref = torch.concat([grid_data_, self.ref_points],dim=0)
+        #print("grid_coord shape",grid_coord.shape)
+        if grid_coord is not None:
+            grid_data_plus_ref = torch.concat([grid_coord, self.ref_points],dim=0)
         else:
             grid_data_plus_ref = self.ref_points
             
+        #print("grid_coord_plus shape",grid_data_plus_ref.shape)
         hu_Simpoints = self.cartesian_dist_no_tile(self.Position_G,grid_data_plus_ref,Transformation_matrix=Transformation_matrix)
         
         sed_dips_SimPoint = self.squared_euclidean_distance(self.Position_G_Modified,grid_data_plus_ref, Transformation_matrix=Transformation_matrix)
@@ -395,32 +380,35 @@ class Gempy(grid):
         
 
         interpolate_result = sigma_0_grad+ sigma_0_interf
+        #print("interpolate_result ", interpolate_result.shape)
+        scalar_field={}
+        scalar_field["scalar_ref_points"] = interpolate_result[-self.number_of_layer:]
+        if section_plot == False:
+            start = 0
+            for keys, values in self.grid_status.items():
+                if values is not None:
+                    end = start + self.data[keys].shape[0] ####
+                    scalar_field[keys] = interpolate_result[start:end]
+                    start = end
+        else:
+            scalar_field["Regular"] = interpolate_result[:-self.number_of_layer]
         
-        self.scalar_field={}
-        self.scalar_field["scalar_ref_points"] = interpolate_result[-self.number_of_layer:]
-        start = 0
-        for keys, values in self.grid_status.items():
-            if values is not None:
-                end = start + self.data[keys].shape[0]
-                self.scalar_field[keys] = interpolate_result[start:end]
-                start = end
-                
-        # print(self.scalar_field)
+        #print(scalar_field["Regular"].shape)
         
-        scalar_ref_points = interpolate_result[-self.number_of_layer:]
-        interpolate_result_grid =interpolate_result[:-self.number_of_layer]
+        # scalar_ref_points = interpolate_result[-self.number_of_layer:]
+        # interpolate_result_grid =interpolate_result[:-self.number_of_layer]
         
-        labels = torch.ones(interpolate_result_grid.shape[0])
-        i=1
-        label_index=[]
-        for ele in torch.sort(scalar_ref_points)[0]:
-            label_index.append(i)
-            mask = interpolate_result_grid >= ele
-            labels= torch.where(mask, i+1, labels)
-            i=i+1
+        # labels = torch.ones(interpolate_result_grid.shape[0])
+        # i=1
+        # label_index=[]
+        # for ele in torch.sort(scalar_ref_points)[0]:
+        #     label_index.append(i)
+        #     mask = interpolate_result_grid >= ele
+        #     labels= torch.where(mask, i+1, labels)
+        #     i=i+1
             
     
-        sorted_ref = torch.cat((interpolate_result.min().unsqueeze(0),torch.sort(scalar_ref_points)[0], interpolate_result.max().unsqueeze(0)))
+        sorted_ref = torch.cat((interpolate_result.min().unsqueeze(0),torch.sort(scalar_field["scalar_ref_points"])[0], interpolate_result.max().unsqueeze(0)))
     
         #print(sorted_ref)
         
@@ -438,32 +426,71 @@ class Gempy(grid):
             modified_interpolate_results_final +=  modified_interpolate_results
             
         modified_interpolate_results_final += 1
-        self.results={}
-        self.results["ref_points"] = modified_interpolate_results_final[-self.number_of_layer:]
-        start = 0
+        results={}
+        results["ref_points"] = modified_interpolate_results_final[-self.number_of_layer:]
+        if section_plot == False:
+            start = 0
+            for keys, values in self.grid_status.items():
+                if values is not None:
+                    end = start + self.data[keys].shape[0]
+                    results[keys] = modified_interpolate_results_final[start:end]
+                    start = end
+        else:
+            results["Regular"] = modified_interpolate_results_final[:-self.number_of_layer]
+                
+        return scalar_field, results
+        
+    def Solution(self,Transformation_matrix=None ):
+        
+        grid_data_final =[]
+        
         for keys, values in self.grid_status.items():
             if values is not None:
-                end = start + self.data[keys].shape[0]
-                self.results[keys] = modified_interpolate_results_final[start:end]
-                start = end
-                
+               grid_data_final.append(self.data[keys]) 
+                 
+        if len(grid_data_final)>1:
+            grid_data_ = torch.cat(grid_data_final, dim=0)
+        elif len(grid_data_final)==1:
+                grid_data_ = grid_data_final[0]
+        else: 
+            print("No grid is active")
+            grid_data_ = None
+            
+        
+        if Transformation_matrix is None:
+            Transformation_matrix = torch.eye(self.op_coord["Positions"].shape[1], dtype =self.dtype)
+        
+        
+        self.scalar_field, self.results = self.Solution_grid(grid_coord=grid_data_, Transformation_matrix=Transformation_matrix)   
         self.solution={}
         self.solution["scalar_field"]= self.scalar_field
         self.solution["result"]=self.results
         return self.solution
     
-    def plot_2D(self, data ,sclar_field,  value, plot_scalar_field = True, plot_input_data=True):
+    def plot_2D(self, data ,sclar_field,  value, plot_scalar_field = True, plot_input_data=True,section=None):
         
         import matplotlib.pyplot as plt
         scatter =plt.scatter(data[:,0], data[:,1], c=value, cmap='viridis', s=100)
                 
+        axis_label = ["X", "Y", "Z", "T"]
+        
+        if section is None:
+            accepted_index = [0,1]
+        else:
+            # Get the key to remove (convert to 0-based index)
+            remove_index = list(section.keys())[0] - 1
+
+            # Create a new list excluding that index
+            accepted_index = [i for i, _ in enumerate(axis_label) if i != remove_index]
+            
         if plot_scalar_field:
             X = self.mesh[0].numpy()
             Y = self.mesh[1].numpy()
             Z = sclar_field.reshape(X.shape).numpy()
             plt.contour(X, Y, Z)
-        #plt.colorbar()
+        
         # Create a legend
+        
         import numpy as np
         legend_labels = np.unique(value.numpy())  # Extract unique labels
         label_map={}
@@ -474,8 +501,8 @@ class Gempy(grid):
             i = i+1 
         legend_handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=scatter.cmap(scatter.norm(label)), markersize=10, label=label_map[label]) for label in legend_labels]
         plt.legend(handles=legend_handles, title='Layers')
-        plt.xlabel('X Coordinates')
-        plt.ylabel('Z Coordinates')
+        plt.xlabel(axis_label[accepted_index[0]] + " Coordinates")
+        plt.ylabel(axis_label[accepted_index[1]] + " Coordinates")
         plt.title('Scatter Plot with Color Labels')
         
         ########################################################################################
@@ -485,28 +512,30 @@ class Gempy(grid):
             colour = ['ro', 'bo']
             i=0
             for _, values in self.sp_coord.items():
-                plt.plot(values[:,0], values[:,1], colour[i])
+                plt.plot(values[:,accepted_index[0]], values[:,accepted_index[1]], colour[i])
                 i=i+1
             
             for i in range(self.Position_G.shape[0]):
-                plt.plot(self.Position_G[i,0], self.Position_G[i,1], 'go')
-                plt.quiver([self.Position_G[i,0]],[self.Position_G[i,1]],self.Value_G[i][0],self.Value_G[i][1],color='r')
-        plt.show()
+                plt.plot(self.Position_G[i,accepted_index[0]], self.Position_G[i,accepted_index[1]], 'go')
+                plt.quiver([self.Position_G[i,accepted_index[0]]],[self.Position_G[i,accepted_index[1]]],self.Value_G[i][accepted_index[0]],self.Value_G[i][accepted_index[1]],color='r')
+        plt.savefig("Plot_2D.png")
+        plt.close()
         
-    def plot_3D(self, data ,  value, plot_scalar_field = True, plot_input_data=True):
+    def plot_3D(self, data ,  value, plot_scalar_field = True, plot_input_data=True, section=None):
         
         import matplotlib.pyplot as plt
         from mpl_toolkits.mplot3d import Axes3D  # Needed for 3D plotting
         
         fig = plt.figure()
-                
+          
         ax = fig.add_subplot(111, projection='3d')
 
         points = data.numpy()  # shape: (N, 3)
         values = value.numpy()  # shape: (N,)
 
         scatter = ax.scatter(points[:, 0], points[:, 1], points[:, 2], c=values, cmap='viridis', s=0.1, alpha=0.5)
-
+        # Create divider and append colorbar axis
+    
         # Optional colorbar
         cbar = fig.colorbar(scatter, ax=ax)
         cbar.set_label("Label")
@@ -520,11 +549,27 @@ class Gempy(grid):
             i = i+1 
         
         legend_handles = [plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=scatter.cmap(scatter.norm(label)), markersize=10, label=label_map[label]) for label in legend_labels]
-        plt.legend(handles=legend_handles, title='Layers')
+        plt.legend(handles=legend_handles, title='Layers',loc="upper left")
         
-        ax.set_xlabel("X")
-        ax.set_ylabel("Y")
-        ax.set_zlabel("Z")
+        ################################################################################
+        #                                     TODO                                     #
+        ################################################################################
+        axis_label = ["X", "Y", "Z", "T"]
+        
+        if section is None:
+            accepted_index = [0,1,2]
+        else:
+            # Get the key to remove (convert to 0-based index)
+            remove_index = list(section.keys())[0] - 1
+
+            # Create a new list excluding that index
+            accepted_index = [i for i, _ in enumerate(axis_label) if i != remove_index]
+
+            
+        ax.set_xlabel(axis_label[accepted_index[0]])
+        ax.set_ylabel(axis_label[accepted_index[1]])
+        ax.set_zlabel(axis_label[accepted_index[2]], labelpad=-5)
+            
         ax.set_title("3D Scatter Plot with Rounded Labels")
         
         
@@ -532,16 +577,18 @@ class Gempy(grid):
         ##### Plot surface points and gradients
         ########################################################################################
         if plot_input_data:
+            
             colour = ['ro', 'bo']
             i=0
             for _, values in self.sp_coord.items():
-                ax.plot(values[:,0], values[:,1], colour[i])
+                ax.plot(values[:,accepted_index[0]], values[:,accepted_index[1]], values[:,accepted_index[2]], colour[i])
                 i=i+1
             
             for i in range(self.Position_G.shape[0]):
-                ax.plot(self.Position_G[i,0], self.Position_G[i,1],self.Position_G[i,2], 'go')
-                ax.quiver([self.Position_G[i,0]],[self.Position_G[i,1]],[self.Position_G[i,2]],self.Value_G[i][0],self.Value_G[i][1],self.Value_G[i][2],color='r')
-        plt.show()
+                ax.plot(self.Position_G[i,accepted_index[0]], self.Position_G[i,accepted_index[1]],self.Position_G[i,accepted_index[2]], 'go')
+                ax.quiver([self.Position_G[i,accepted_index[0]]],[self.Position_G[i,accepted_index[1]]],[self.Position_G[i,accepted_index[2]]],self.Value_G[i][accepted_index[0]],self.Value_G[i][accepted_index[1]],self.Value_G[i][accepted_index[2]],color='r')
+        plt.savefig("Plot_3D.png")
+        plt.close()
         
         
     def plot_data(self, sol, plot_scalar_field = True, plot_input_data=True):
@@ -561,18 +608,58 @@ class Gempy(grid):
                 self.plot_3D(data=self.data["Regular"], value= torch.round(sol["result"]['Regular']), plot_scalar_field=plot_scalar_field, plot_input_data=plot_input_data)
                 
             else:
-                print("Since it is difficult to plot it for visualisation, provide the section along which you want to visualize to make it 2D or 3D plot")
+                print("Since it is difficult to plot more than 3D for visualisation, provide the section along which you want to visualize to make it 2D or 3D plot")
                 
-    def plot_data_section(self, sol, section, plot_scalar_field = True, plot_input_data=True):
+    def plot_data_section(self, section, plot_scalar_field = True, plot_input_data=True):
         
         if self.grid_status["Regular"] is not None:
             
             print("Regular grid is activate")
             
             self.dim = self.data["Regular"].shape[1]
-            if section is not None:
+            
+            if section is not None: 
                 plot_dim = self.dim - len(section)
                 print("Dimension of the plot would be : ", plot_dim)
+                if plot_dim not in [2,3]:
+                    print("Plot Dimesnion must be 2 or 3")
+                    exit()
+                else:
+                    self.grid_hyperplane = []
+
+                    # Generate linspace per dimension
+                    for i in range(len(self.resolution)):
+                        if i+1 in section:
+                            self.grid_hyperplane.append(torch.tensor(section[i+1], dtype=self.dtype))
+                        else:
+                            start = self.extent[2*i]
+                            end = self.extent[2*i + 1]
+                            self.grid_hyperplane.append(torch.linspace(start, end, self.resolution[i], dtype=self.dtype))
+                    # Create meshgrid (cartesian product of all dimensions)
+                    mesh = torch.meshgrid(*self.grid_hyperplane, indexing="ij")  # Use 'ij' to keep dimensionality consistent
+                    
+                    # Flatten and stack each dimension
+                    flat = [m.reshape(-1) for m in mesh]
+                    full_grid_hyp = torch.stack(flat, dim=1)  # Shape: (num_points, num_dimensions)
+
+                    # Find the solution at this location
+                    scalar_field, results = self.Solution_grid(grid_coord=full_grid_hyp, Transformation_matrix=torch.eye(4, dtype=self.dtype),section_plot=True)
+                    
+                    # Plot
+                    columns_to_keep = [i for i in range(full_grid_hyp.shape[1]) if i + 1 not in section]
+                    final_grid = full_grid_hyp[:, columns_to_keep]
+                    
+                    mesh_selected = tuple(mesh[i].squeeze() for i in columns_to_keep)
+                    self.mesh = mesh_selected
+                    if plot_dim==2:
+                        #print(final_grid.shape, scalar_field["Regular"] )
+                        
+                        
+                        self.plot_2D(data=final_grid, sclar_field=scalar_field["Regular"], value= torch.round(results['Regular']), plot_scalar_field=plot_scalar_field, plot_input_data=plot_input_data, section=section)
+                    else:
+                        self.plot_3D(data=final_grid, value= torch.round(results['Regular']), plot_scalar_field=plot_scalar_field, plot_input_data=plot_input_data,section=section) 
+                        
+    
                 
             else:
                 print("Provide a valid section")
@@ -580,16 +667,16 @@ def main():
     ###########################################################################################################################      
     #                               2D
     ###########################################################################################################################          
-    gp = Gempy("Gempy_test", 
-               extent=[-0.5,4.5, -0.5 ,4.5],
-               resolution=[100, 100]
-               )
+    # gp = Gempy("Gempy_test", 
+    #            extent=[-0.5,4.5, -0.5 ,4.5],
+    #            resolution=[100, 100]
+    #            )
 
-    interface_data={"Surface 1": torch.tensor([[0,2],[2,4],[4,2],[2,0]]), "Surface 2": torch.tensor([[1,2],[2,3],[3,2],[2,1]])}
-    orientation_data ={"Positions": torch.tensor([[2., 4.0], [2,0], [2,3],[2,1]]), "Values": torch.tensor([[0, 1.0], [0.,-1.0], [0, 1.0], [0.,-1.0]])}
-    gp.interface_data(interface_data)
-    gp.orientation_data(orientation_data)
-    custom_data = torch.tensor([[4,2]], dtype=torch.float32)
+    # interface_data={"Surface 1": torch.tensor([[0,2],[2,4],[4,2],[2,0]]), "Surface 2": torch.tensor([[1,2],[2,3],[3,2],[2,1]])}
+    # orientation_data ={"Positions": torch.tensor([[2., 4.0], [2,0], [2,3],[2,1]]), "Values": torch.tensor([[0, 1.0], [0.,-1.0], [0, 1.0], [0.,-1.0]])}
+    # gp.interface_data(interface_data)
+    # gp.orientation_data(orientation_data)
+    # custom_data = torch.tensor([[4,2]], dtype=torch.float32)
 
     ###########################################################################################################################      
     #                               3D
@@ -607,69 +694,72 @@ def main():
     ###########################################################################################################################      
     #                               4D
     ###########################################################################################################################          
-    # gp = Gempy("Gempy_test", 
-    #         extent=[-0.5,4.5, -0.5 ,4.5, -0.5, 4.5, -0.5, 4.5],
-    #         resolution=[50, 50, 50, 50]
-    #         )
-
-    # interface_data={"Surface 1": torch.tensor([[0,2,1, 1],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
-    # orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,1], [2,0,1,1], [2,3,2,1],[2,1,2,1]]), "Values": torch.tensor([[0, 1.0,0,0], [0.,-1.0,0,0], [0, 1.0,0,0], [0.,-1.0,0,0]])}
-    # gp.interface_data(interface_data)
-    # gp.orientation_data(orientation_data)
-    # custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
-
-    gp.activate_custom_grid(custom_grid_data=custom_data)
-    #gp.active_grid()
-    gp.deactivate_grid("Regular")
-    sol = gp.Solution()
-    # print(sol)
-
-
-    #gp.active_grid()
-    gp.activate_grid("Regular")
-    gp.active_grid()
-    sol = gp.Solution()
-    gp.plot_data(sol=sol, plot_scalar_field= True, plot_input_data=True)
-    #gp.plot_data_section(sol, section={4:1}, plot_scalar_field = True, plot_input_data=True)
-    print(sol)
-    
-    def jacobian_test(*param):
-    
-        gp = Gempy("Gempy_test", 
+    gp = Gempy("Gempy_test", 
             extent=[-0.5,4.5, -0.5 ,4.5, -0.5, 4.5, -0.5, 4.5],
             resolution=[50, 50, 50, 50]
             )
 
-        interface_data={"Surface 1": torch.tensor([[0,2,1, param[0][0]],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
-        orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,1], [2,0,1,1], [2,3,2,1],[2,1,2,1]]), "Values": torch.tensor([[0, 1.0,0,0], [0.,-1.0,0,0], [0, 1.0,0,0], [0.,-1.0,0,0]])}
-        gp.interface_data(interface_data)
-        gp.orientation_data(orientation_data)
-        #custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
-        custom_data = torch.randn(1024, 4).to(torch.float32)
-        gp.activate_custom_grid(custom_grid_data=custom_data)
-        gp.active_grid()
-        gp.deactivate_grid("Regular")
-        sol = gp.Solution()
-        #print(sol)
-        
-        return sol["result"]["Custom"]
-        
-    from torch.autograd.functional import jacobian
-    from datetime import datetime
+    interface_data={"Surface 1": torch.tensor([[0,2,1, 1],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
+    orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,-1], [2,0,1,1], [2,3,2,2],[2,1,2,3]]), "Values": torch.tensor([[0, 1.0,0,1], [0.,-1.0,0,1], [0, 1.0,0,1], [0.,-1.0,0,1]])}
+    gp.interface_data(interface_data)
+    gp.orientation_data(orientation_data)
+    custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
 
-    start_time = datetime.now()
-    a=torch.tensor(1.0).reshape(-1,1)
-    print(a.shape)
-    theta_data = tuple([a.clone().requires_grad_(True)])
-    mean = jacobian_test(theta_data)
-    end_time = datetime.now()
-    elapsed_time = end_time - start_time
-    print(f"Elapsed time for Gempy: {elapsed_time}")
-    start_time = datetime.now()
-    J = jacobian(jacobian_test, theta_data)
-    end_time = datetime.now()
-    elapsed_time = end_time - start_time
-    print(f"Elapsed time for Jacobian: {elapsed_time}")
+    gp.activate_custom_grid(custom_grid_data=custom_data)
+    #gp.active_grid()
+    #gp.deactivate_grid("Regular")
+    sol = gp.Solution()
+    # print(sol)
+    
+
+    #gp.active_grid()
+    #gp.activate_grid("Regular")
+    gp.active_grid()
+    sol = gp.Solution()
+    #print(sol)
+    # gp.plot_data(sol=sol, plot_scalar_field= True, plot_input_data=True)
+    
+    for t in [-0.5, 0, 0.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3] :
+        gp.plot_data_section(section={3:2, 4:t}, plot_scalar_field = True, plot_input_data=True)
+    
+    
+    # def jacobian_test(*param):
+    
+    #     gp = Gempy("Gempy_test", 
+    #         extent=[-0.5,4.5, -0.5 ,4.5, -0.5, 4.5, -0.5, 4.5],
+    #         resolution=[50, 50, 50, 50]
+    #         )
+
+    #     interface_data={"Surface 1": torch.tensor([[0,2,1, param[0][0]],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
+    #     orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,1], [2,0,1,1], [2,3,2,1],[2,1,2,1]]), "Values": torch.tensor([[0, 1.0,0,0], [0.,-1.0,0,0], [0, 1.0,0,0], [0.,-1.0,0,0]])}
+    #     gp.interface_data(interface_data)
+    #     gp.orientation_data(orientation_data)
+    #     #custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
+    #     custom_data = torch.randn(1024, 4).to(torch.float32)
+    #     gp.activate_custom_grid(custom_grid_data=custom_data)
+    #     gp.active_grid()
+    #     gp.deactivate_grid("Regular")
+    #     sol = gp.Solution()
+    #     #print(sol)
+        
+    #     return sol["result"]["Custom"]
+        
+    # from torch.autograd.functional import jacobian
+    # from datetime import datetime
+
+    # start_time = datetime.now()
+    # a=torch.tensor(1.0).reshape(-1,1)
+    # print(a.shape)
+    # theta_data = tuple([a.clone().requires_grad_(True)])
+    # mean = jacobian_test(theta_data)
+    # end_time = datetime.now()
+    # elapsed_time = end_time - start_time
+    # print(f"Elapsed time for Gempy: {elapsed_time}")
+    # start_time = datetime.now()
+    # J = jacobian(jacobian_test, theta_data)
+    # end_time = datetime.now()
+    # elapsed_time = end_time - start_time
+    # print(f"Elapsed time for Jacobian: {elapsed_time}")
         
     
 if __name__ == "__main__":
