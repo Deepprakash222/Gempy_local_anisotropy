@@ -67,21 +67,30 @@ class Gempy(grid):
         self.c_o_T = self.a_T**2/14/3
         self.s_1 = 0.01
         self.s_2 = 0.01
+        self.Transformation_matrix = torch.eye(len(resolution), dtype=self.dtype)
+    
         
+            
     def interpolation_options(self):
         print("a_T =", self.a_T)
         print("c_o_T =", self.c_o_T)
         print("s_1 =", self.s_1)
         print("s_2 =",self.s_2)
-    def interpolation_options_set(self, a_T=5, c_o_T = 0.5952380952380952, s_1=0.01, s_2 = 0.01):
+        print("Transformation Matrix =\n", self.Transformation_matrix)
+        
+    def interpolation_options_set(self, a_T=5, c_o_T = 0.5952380952380952, s_1=0.01, s_2 = 0.01, Transformation_matrix=None):
         self.a_T = a_T
         self.c_o_T = c_o_T
         self.s_1 = s_1
         self.s_2 = s_2
+        if Transformation_matrix is not None:
+            self.Transformation_matrix = Transformation_matrix
+            
+        print("Interpolation option after modification: \n")
+        self.interpolation_options()
         
     def interface_data(self, sp_coord):
-        print("\n ############# Gempy Options ############# \n")
-        self.interpolation_options()
+       
         self.sp_coord = sp_coord
         print("\n ############# Interface data ############# \n",self.sp_coord)
         
@@ -127,9 +136,9 @@ class Gempy(grid):
         C_r_dash_dash =self.c_o_T * 7 * (9 * r ** 5 - 20 * self.a_T ** 2 * r ** 3 + 15 * self.a_T ** 4 * r - 4 * self.a_T ** 5) / (2 * self.a_T ** 7)
         return C_r_dash_dash
 
-    def squared_euclidean_distance(self, x_1,x_2, Transformation_matrix=torch.eye(2)):
-        x_1 = x_1 @ Transformation_matrix.T
-        x_2 = x_2 @ Transformation_matrix.T
+    def squared_euclidean_distance(self, x_1,x_2):
+        x_1 = x_1 @ self.Transformation_matrix.T
+        x_2 = x_2 @ self.Transformation_matrix.T
 
         sqd = torch.sqrt(torch.clip(torch.reshape(torch.sum(x_1**2,1),shape =(x_1.shape[0],1))+\
         torch.reshape(torch.sum(x_2**2,1),shape =(1,x_2.shape[0]))-\
@@ -137,9 +146,9 @@ class Gempy(grid):
         
         return sqd
 
-    def cartesian_dist_hu(self, x1, x2, Transformation_matrix=torch.eye(2) ):
-        x1 = x1@ Transformation_matrix.T
-        x2 = x2@ Transformation_matrix.T
+    def cartesian_dist_hu(self, x1, x2 ):
+        x1 = x1@ self.Transformation_matrix.T
+        x2 = x2@ self.Transformation_matrix.T
         k = x1.shape[1]
         H =[]
         dummy_H = []
@@ -151,12 +160,12 @@ class Gempy(grid):
         for i in range(k):
             a=torch.zeros(H[i].shape)
             for j in range(k):
-                a= a +  Transformation_matrix[j,i] * H[j]
+                a= a +  self.Transformation_matrix[j,i] * H[j]
             dummy_H.append(a)
         H = dummy_H
         return H
 
-    def cov_gradients(self, dist_tiled, H, Transformation_matrix=torch.eye(2), nugget_effect_grad=1/3):
+    def cov_gradients(self, dist_tiled, H,  nugget_effect_grad=1/3):
         k = len(H) # component of gradient available
         n = int(H[0].shape[0]/ k) # number of place where gradient is defined
 
@@ -177,7 +186,7 @@ class Gempy(grid):
                 # Cross gradient term for C_ZuZv
                 if i != j:
                     t2 = - self.first_derivative_covariance_function_divided_by_r(dist) + self.second_derivative_covariance_function(dist)
-                    anisotrop_term = self.first_derivative_covariance_function_divided_by_r(dist) * torch.sum(Transformation_matrix[:,i]*Transformation_matrix[:,j])
+                    anisotrop_term = self.first_derivative_covariance_function_divided_by_r(dist) * torch.sum(self.Transformation_matrix[:,i]*self.Transformation_matrix[:,j])
                     array_test = -(hu_hv_by_dist_sqr * t2 + anisotrop_term)
                     for l in range(n):
                         for m in range(n):
@@ -191,7 +200,7 @@ class Gempy(grid):
                     t4 = self.first_derivative_covariance_function(dist)
                     
                     # Here we have added the last term for anisotropy effect
-                    t5 = torch.sum((Transformation_matrix[:,i])**2) * self.first_derivative_covariance_function_divided_by_r(dist) 
+                    t5 = torch.sum((self.Transformation_matrix[:,i])**2) * self.first_derivative_covariance_function_divided_by_r(dist) 
                     
                     t6 = self.second_derivative_covariance_function(dist)
                     
@@ -213,10 +222,10 @@ class Gempy(grid):
         return C_G
 
     def cov_interface(self, ref_layer_points,rest_layer_points, Transformation_matrix=torch.eye(2),nugget_effect_interface=1/3):
-        sed_rest_rest = self.squared_euclidean_distance(rest_layer_points,rest_layer_points, Transformation_matrix=Transformation_matrix)
-        sed_ref_rest = self.squared_euclidean_distance(ref_layer_points,rest_layer_points, Transformation_matrix=Transformation_matrix)
-        sed_rest_ref = self.squared_euclidean_distance(rest_layer_points,ref_layer_points, Transformation_matrix=Transformation_matrix)
-        sed_ref_ref = self.squared_euclidean_distance(ref_layer_points,ref_layer_points, Transformation_matrix=Transformation_matrix)
+        sed_rest_rest = self.squared_euclidean_distance(rest_layer_points,rest_layer_points)
+        sed_ref_rest = self.squared_euclidean_distance(ref_layer_points,rest_layer_points)
+        sed_rest_ref = self.squared_euclidean_distance(rest_layer_points,ref_layer_points)
+        sed_ref_ref = self.squared_euclidean_distance(ref_layer_points,ref_layer_points)
         
         C_I = self.covariance_function(sed_rest_rest) -\
             self.covariance_function(sed_ref_rest) -\
@@ -227,9 +236,9 @@ class Gempy(grid):
 
     ## Cartesian distance between dips and interface points
 
-    def cartesian_dist_no_tile(self, x_1,x_2, Transformation_matrix=torch.eye(2)):
-        x_1 = x_1 @ Transformation_matrix.T
-        x_2 = x_2 @ Transformation_matrix.T
+    def cartesian_dist_no_tile(self, x_1,x_2):
+        x_1 = x_1 @ self.Transformation_matrix.T
+        x_2 = x_2 @ self.Transformation_matrix.T
         k = x_1[0].shape[0]
         H_I = []
         for i in range(k):
@@ -240,7 +249,7 @@ class Gempy(grid):
         for i in range(k):
             a=torch.zeros(H_I[i].shape)
             for j in range(k):
-                a= a + Transformation_matrix[j,i] * H_I[j]
+                a= a + self.Transformation_matrix[j,i] * H_I[j]
             Dummy_H_I.append(a)
         
         H_I = Dummy_H_I
@@ -248,9 +257,9 @@ class Gempy(grid):
         
         return H_I
 
-    def cov_interface_gradients(self, hu_rest,hu_ref, Position_G_Modified, rest_layer_points, ref_layer_points, Transformation_matrix=torch.eye(2)):
-        sed_dips_rest = self.squared_euclidean_distance(Position_G_Modified,rest_layer_points,Transformation_matrix=Transformation_matrix)
-        sed_dips_ref = self.squared_euclidean_distance(Position_G_Modified,ref_layer_points,Transformation_matrix=Transformation_matrix)
+    def cov_interface_gradients(self, hu_rest,hu_ref, Position_G_Modified, rest_layer_points, ref_layer_points):
+        sed_dips_rest = self.squared_euclidean_distance(Position_G_Modified,rest_layer_points)
+        sed_dips_ref = self.squared_euclidean_distance(Position_G_Modified,ref_layer_points)
         
         C_GI = - hu_rest * self.first_derivative_covariance_function_divided_by_r(sed_dips_rest) + hu_ref* self.first_derivative_covariance_function_divided_by_r(sed_dips_ref)
         
@@ -273,7 +282,7 @@ class Gempy(grid):
         return ref_layer_points,rest_layer_points
         
         
-    def Ge_model(self, Transformation_matrix=None, nugget_effect_grad=1/3,nugget_effect_interface=1/3):
+    def Ge_model(self, nugget_effect_grad=1e-8,nugget_effect_interface=1e-8):
         ''' 
             Args:
                 Input data:
@@ -290,7 +299,8 @@ class Gempy(grid):
         
         ## defining the dips position
         self.Position_G = self.op_coord["Positions"].to(self.dtype) # Location where Dips or gradient are given
-        self.Value_G    = self.op_coord["Values"].to(self.dtype) # Gx, Gy, ..., Gk are the componet of gradient available at the given location
+        self.Value_G    = self.op_coord["Values"].to(self.dtype) @ self.Transformation_matrix.T # Gx, Gy, ..., Gk are the componet of gradient available at the given location
+       
         n= self.Position_G.shape[0] # Total number of points available for gradient or dips
         k = self.Position_G[0].shape[0] # Total number of component available for the gradient
         # Since we have two component of the gradient, we can write the position twice corresponding to each coponent. We are assuming that 
@@ -312,23 +322,23 @@ class Gempy(grid):
         
         self.ref_layer_points,self.rest_layer_points = self.set_rest_ref_matrix2(self.number_of_points_per_surface,input_position)
         
-        dist_position = self.squared_euclidean_distance(self.Position_G_Modified, self.Position_G_Modified, Transformation_matrix=Transformation_matrix) 
+        dist_position = self.squared_euclidean_distance(self.Position_G_Modified, self.Position_G_Modified) 
         # the dist_position can be all zero if there is only one point is defined where gradient is known.
         # 
         dist_position = dist_position #+  torch.eye(dist_position.shape[0])
 
         # Calculate the cartesian distance 
 
-        H = self.cartesian_dist_hu(self.Position_G_Modified, self.Position_G_Modified, Transformation_matrix=Transformation_matrix)
+        H = self.cartesian_dist_hu(self.Position_G_Modified, self.Position_G_Modified)
         
-        C_G = self.cov_gradients(dist_tiled=dist_position, H=H, Transformation_matrix=Transformation_matrix,nugget_effect_grad=nugget_effect_grad)
+        C_G = self.cov_gradients(dist_tiled=dist_position, H=H,nugget_effect_grad=nugget_effect_grad)
         
-        C_I = self.cov_interface(self.ref_layer_points,self.rest_layer_points, Transformation_matrix=Transformation_matrix, nugget_effect_interface=nugget_effect_interface)
+        C_I = self.cov_interface(self.ref_layer_points,self.rest_layer_points, nugget_effect_interface=nugget_effect_interface)
         
-        hu_rest = self.cartesian_dist_no_tile(self.Position_G,self.rest_layer_points, Transformation_matrix=Transformation_matrix)
-        hu_ref = self.cartesian_dist_no_tile(self.Position_G,self.ref_layer_points, Transformation_matrix=Transformation_matrix)   
+        hu_rest = self.cartesian_dist_no_tile(self.Position_G,self.rest_layer_points)
+        hu_ref = self.cartesian_dist_no_tile(self.Position_G,self.ref_layer_points)   
 
-        C_GI = self.cov_interface_gradients(hu_rest,hu_ref, self.Position_G_Modified, self.rest_layer_points, self.ref_layer_points, Transformation_matrix=Transformation_matrix)
+        C_GI = self.cov_interface_gradients(hu_rest,hu_ref, self.Position_G_Modified, self.rest_layer_points, self.ref_layer_points)
 
         C_IG = C_GI.T
 
@@ -345,8 +355,8 @@ class Gempy(grid):
         
         self.w = torch.linalg.solve(K,b)
     
-    def Solution_grid(self, grid_coord, Transformation_matrix, section_plot= False):
-        self.Ge_model(Transformation_matrix=Transformation_matrix)
+    def Solution_grid(self, grid_coord, section_plot= False):
+        self.Ge_model()
         
         self.ref_points = torch.unique(self.ref_layer_points,dim=0)
         #print("grid_coord shape",grid_coord.shape)
@@ -356,9 +366,9 @@ class Gempy(grid):
             grid_data_plus_ref = self.ref_points
             
         #print("grid_coord_plus shape",grid_data_plus_ref.shape)
-        hu_Simpoints = self.cartesian_dist_no_tile(self.Position_G,grid_data_plus_ref,Transformation_matrix=Transformation_matrix)
+        hu_Simpoints = self.cartesian_dist_no_tile(self.Position_G,grid_data_plus_ref)
         
-        sed_dips_SimPoint = self.squared_euclidean_distance(self.Position_G_Modified,grid_data_plus_ref, Transformation_matrix=Transformation_matrix)
+        sed_dips_SimPoint = self.squared_euclidean_distance(self.Position_G_Modified,grid_data_plus_ref)
         
 
         ####################################### TODO #######################################
@@ -370,8 +380,8 @@ class Gempy(grid):
         sigma_0_grad = torch.sum(sigma_0_grad,axis=0)
         
 
-        sed_rest_SimPoint = self.squared_euclidean_distance(self.rest_layer_points,grid_data_plus_ref,Transformation_matrix=Transformation_matrix)
-        sed_ref_SimPoint = self.squared_euclidean_distance(self.ref_layer_points,grid_data_plus_ref, Transformation_matrix=Transformation_matrix)
+        sed_rest_SimPoint = self.squared_euclidean_distance(self.rest_layer_points,grid_data_plus_ref)
+        sed_ref_SimPoint = self.squared_euclidean_distance(self.ref_layer_points,grid_data_plus_ref)
 
         
         sigma_0_interf =  self.w[self.Position_G.shape[0]*self.Position_G.shape[1]:]*(-self.covariance_function(sed_rest_SimPoint) + self.covariance_function(sed_ref_SimPoint))
@@ -440,7 +450,7 @@ class Gempy(grid):
                 
         return scalar_field, results
         
-    def Solution(self,Transformation_matrix=None ):
+    def Solution(self ):
         
         grid_data_final =[]
         
@@ -457,11 +467,9 @@ class Gempy(grid):
             grid_data_ = None
             
         
-        if Transformation_matrix is None:
-            Transformation_matrix = torch.eye(self.op_coord["Positions"].shape[1], dtype =self.dtype)
+       
         
-        
-        self.scalar_field, self.results = self.Solution_grid(grid_coord=grid_data_, Transformation_matrix=Transformation_matrix)   
+        self.scalar_field, self.results = self.Solution_grid(grid_coord=grid_data_)   
         self.solution={}
         self.solution["scalar_field"]= self.scalar_field
         self.solution["result"]=self.results
@@ -643,7 +651,7 @@ class Gempy(grid):
                     full_grid_hyp = torch.stack(flat, dim=1)  # Shape: (num_points, num_dimensions)
 
                     # Find the solution at this location
-                    scalar_field, results = self.Solution_grid(grid_coord=full_grid_hyp, Transformation_matrix=torch.eye(4, dtype=self.dtype),section_plot=True)
+                    scalar_field, results = self.Solution_grid(grid_coord=full_grid_hyp,section_plot=True)
                     
                     # Plot
                     columns_to_keep = [i for i in range(full_grid_hyp.shape[1]) if i + 1 not in section]
@@ -677,6 +685,17 @@ def main():
     # gp.interface_data(interface_data)
     # gp.orientation_data(orientation_data)
     # custom_data = torch.tensor([[4,2]], dtype=torch.float32)
+    
+    # gp = Gempy("Gempy_test", 
+    #            extent=[-0.5,4.5, -0.5 ,4.5],
+    #            resolution=[100, 100]
+    #            )
+
+    # interface_data={"Surface 1": torch.tensor([[0,1],[1,1],[3,3],[4,3]]), "Surface 2": torch.tensor([[0,2],[1,2],[3,4],[4,4]])}
+    # orientation_data ={"Positions": torch.tensor([[0.5, 1], [0.5,2], [3.5,3],[3.5,4]]), "Values": torch.tensor([[0, 0.4], [0.,0.5], [0, 0.5], [0,0.01]])}
+    # gp.interface_data(interface_data)
+    # gp.orientation_data(orientation_data)
+    # custom_data = torch.tensor([[4,2]], dtype=torch.float32)
 
     ###########################################################################################################################      
     #                               3D
@@ -691,19 +710,45 @@ def main():
     # gp.interface_data(interface_data)
     # gp.orientation_data(orientation_data)
     # custom_data = torch.tensor([[4,2,3]], dtype=torch.float32)
+    
+    
+    # gp = Gempy("Gempy_test", 
+    #            extent=[-0.5,4.5, -0.5 ,4.5, -0.5,4.5],
+    #            resolution=[50, 50,50]
+    #            )
+
+    # interface_data={"Surface 1": torch.tensor([[0,1,1],[1,1,1],[3,3,1],[4,3,1]]), "Surface 2": torch.tensor([[0,2,2],[1,2,2],[3,4,2],[4,4,2]])}
+    # orientation_data ={"Positions": torch.tensor([[0.5, 1,1], [0.5,2,2], [3.5,3,1],[3.5,4,2]]), "Values": torch.tensor([[0, 0.4,0], [0.,0.5,0], [0, 0.5,0], [0,0.01,0]])}
+    # gp.interface_data(interface_data)
+    # gp.orientation_data(orientation_data)
+    # custom_data = torch.tensor([[4,2,3]], dtype=torch.float32)
+
     ###########################################################################################################################      
     #                               4D
     ###########################################################################################################################          
-    gp = Gempy("Gempy_test", 
-            extent=[-0.5,4.5, -0.5 ,4.5, -0.5, 4.5, -0.5, 4.5],
-            resolution=[50, 50, 50, 50]
-            )
+    # gp = Gempy("Gempy_test", 
+    #         extent=[-0.5,4.5, -0.5 ,4.5, -0.5, 4.5, -0.5, 4.5],
+    #         resolution=[50, 50, 50, 50]
+    #         )
 
-    interface_data={"Surface 1": torch.tensor([[0,2,1, 1],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
-    orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,-1], [2,0,1,1], [2,3,2,2],[2,1,2,3]]), "Values": torch.tensor([[0, 1.0,0,1], [0.,-1.0,0,1], [0, 1.0,0,1], [0.,-1.0,0,1]])}
+    # interface_data={"Surface 1": torch.tensor([[0,2,1, 1],[2,4,1,1],[4,2,1,1],[2,0,1,1]]), "Surface 2": torch.tensor([[1,2,2,1],[2,3,2,1],[3,2,2,1],[2,1,2,1]])}
+    # orientation_data ={"Positions": torch.tensor([[2., 4.0, 1,-1], [2,0,1,1], [2,3,2,2],[2,1,2,3]]), "Values": torch.tensor([[0, 1.0,0,1], [0.,-1.0,0,1], [0, 1.0,0,1], [0.,-1.0,0,1]])}
+    # gp.interface_data(interface_data)
+    # gp.orientation_data(orientation_data)
+    # custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
+    Transformation_matrix = torch.diag(torch.tensor([1,1,1,0.5],dtype=torch.float32))
+    gp = Gempy("Gempy_test", 
+               extent=[-0.5,4.5, -0.5 ,0.5, -0.5, 4.5, -0.5, 4.5],
+                resolution=[100, 20, 100, 2]
+               )
+
+    interface_data={"Surface 1": torch.tensor([[0,0,1,0],[1,0,1,0],[3,0,3,0],[4,0,3,0]]), "Surface 2": torch.tensor([[0,0,2, 0],[1,0,2,0],[3,0,4,0],[4,0,4,0]])}
+    orientation_data ={"Positions": torch.tensor([[0.5, 0,1,0], [0.5,0,2,0], [3.5,0,3,0],[3.5,0,4,0]]), "Values": torch.tensor([[0, 0.,1,1], [0.,0,1,1], [0, 0,1,1], [0,0.,1,1]])}
     gp.interface_data(interface_data)
     gp.orientation_data(orientation_data)
-    custom_data = torch.tensor([[4,2,3,1]], dtype=torch.float32)
+    gp.interpolation_options()
+    gp.interpolation_options_set(Transformation_matrix=Transformation_matrix)
+    custom_data = torch.tensor([[4,2,3]], dtype=torch.float32)
 
     gp.activate_custom_grid(custom_grid_data=custom_data)
     #gp.active_grid()
@@ -717,10 +762,11 @@ def main():
     gp.active_grid()
     sol = gp.Solution()
     #print(sol)
-    # gp.plot_data(sol=sol, plot_scalar_field= True, plot_input_data=True)
-    
-    for t in [-0.5, 0, 0.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3] :
-        gp.plot_data_section(section={3:2, 4:t}, plot_scalar_field = True, plot_input_data=True)
+    #gp.plot_data(sol=sol, plot_scalar_field= True, plot_input_data=True)
+    import time
+    for t in [-0.5, 0, 0.5, .75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3, 3.5, 4,4.5] :
+        gp.plot_data_section(section={4:t}, plot_scalar_field = True, plot_input_data=True)
+        time.sleep(1)
     
     
     # def jacobian_test(*param):
