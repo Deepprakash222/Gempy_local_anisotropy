@@ -82,7 +82,7 @@ pl.write_frame()
 arrow_actors = []
 
 # Helper to (re)draw principal strain axes and velocity vectors
-def update_overlays(FS, VXr_tot, VYr_tot, VZr_tot, defmode, shearmode, nadai, lode, time, ps_rate, xy_rate, xz_rate, yz_rate):
+def update_overlays(FS, VXr_tot, VYr_tot, VZr_tot, defmode, shearmode, nadai, lode, time, xy_rate, xz_rate, yz_rate):
     global arrow_actors
     # Remove previous arrows
     for act in arrow_actors:
@@ -131,10 +131,10 @@ def update_overlays(FS, VXr_tot, VYr_tot, VZr_tot, defmode, shearmode, nadai, lo
     txt_actor.SetText(
         3,
         f"Time: {time:.2f} units\n"
-        f"eii rate = {ps_rate:.2f}, exy rate = {xy_rate:.2f}\n"
-        f"exz rate = {xz_rate:.2f}, eyz rate = {yz_rate:.2f}\n"
         f"Deformation: {defmode}\n"
         f"Shearing: {shearmode}\n"
+        f"exy rate = {xy_rate:.2f}\n"
+        f"exz rate = {xz_rate:.2f}, eyz rate = {yz_rate:.2f}\n"
         f"Nadai strain es = {nadai:.2f}\n"
         fr"Lodes ratio nu = {lode:.3f}"
     )
@@ -243,7 +243,7 @@ for it in range(1, nt + 1):
     grid.shallow_copy(grid_update)
    
     # Redraw overlays (principal axes + velocity field) and HUD text
-    update_overlays(FS, VXr_tot, VYr_tot, VZr_tot, defmode, shearmode, nadai_strain, lodes_ratio, time, ps_rate, xy_rate, xz_rate, yz_rate)
+    update_overlays(FS, VXr_tot, VYr_tot, VZr_tot, defmode, shearmode, nadai_strain, lodes_ratio, time, xy_rate, xz_rate, yz_rate)
 
     # Write and Render this frame
     pl.write_frame()
